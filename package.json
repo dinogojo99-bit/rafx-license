@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "discord-interactions": "^4.4.0"
   }
 }
