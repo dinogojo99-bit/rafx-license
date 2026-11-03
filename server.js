@@ -29,6 +29,78 @@ app.get("/", (req, res) => {
     status: "online"
   });
 });
+app.get("/test", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>RAFX LICENSE TEST</title>
+      <style>
+        body {
+          background: #080a12;
+          color: white;
+          font-family: Arial;
+          text-align: center;
+          padding: 30px 15px;
+        }
+        input, button {
+          display: block;
+          width: 100%;
+          max-width: 350px;
+          box-sizing: border-box;
+          padding: 14px;
+          margin: 12px auto;
+          border-radius: 8px;
+        }
+        button {
+          background: #7c3aed;
+          color: white;
+          border: 0;
+          font-weight: bold;
+        }
+        #result { margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <h1>RAFX LICENSE</h1>
+      <p>TESTE DE ATIVAÇÃO</p>
+
+      <input id="key" placeholder="Digite sua KEY">
+      <input id="device" placeholder="ID do dispositivo">
+
+      <button onclick="validateKey()">VALIDAR KEY</button>
+
+      <p id="result"></p>
+
+      <script>
+        async function validateKey() {
+          const result = document.getElementById("result");
+          result.textContent = "Verificando...";
+
+          try {
+            const response = await fetch("/validate", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                key: document.getElementById("key").value,
+                deviceId: document.getElementById("device").value
+              })
+            });
+
+            const data = await response.json();
+            result.textContent = data.message;
+          } catch (error) {
+            result.textContent = "Erro de conexão com o servidor.";
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
 
 function hashKey(key) {
   return crypto.createHash("sha256").update(key).digest("hex");
