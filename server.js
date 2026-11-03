@@ -29,27 +29,23 @@ function checkAdmin(password) {
     crypto.timingSafeEqual(a, b);
 }
 
-// Discord: receber e validar interações
-// IMPORTANTE: esta rota precisa ficar antes do express.json()
+// Discord: receber interações
+// Esta rota precisa ficar antes do express.json()
 app.post(
   "/discord/interactions",
   express.raw({ type: "application/json" }),
-  async (req, res) => {
+  (req, res) => {
     try {
       const signature = req.headers["x-signature-ed25519"];
       const timestamp = req.headers["x-signature-timestamp"];
       const publicKey = process.env.DISCORD_PUBLIC_KEY;
 
-      if (
-        !signature ||
-        !timestamp ||
-        !publicKey ||
-        !Buffer.isBuffer(req.body)
-      ) {
+      if (!signature || !timestamp || !publicKey ||
+          !Buffer.isBuffer(req.body)) {
         return res.status(401).send("Requisição inválida");
       }
 
-      const valid = await verifyKey(
+      const valid = verifyKey(
         req.body,
         signature,
         timestamp,
@@ -62,7 +58,7 @@ app.post(
 
       const interaction = JSON.parse(req.body.toString());
 
-      // PING de verificação do Discord
+      // Verificação do endpoint
       if (interaction.type === 1) {
         return res.json({ type: 1 });
       }
@@ -84,7 +80,6 @@ app.post(
 
     } catch (error) {
       console.error("Erro Discord:", error.message);
-
       return res.status(400).send("Erro na interação");
     }
   }
@@ -93,6 +88,63 @@ app.post(
 // JSON das outras rotas
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: false }));
+
+// Registrar comando /ping
+app.post("/admin/register-command", async (req, res) => {
+  try {
+    const { password } = req.body || {};
+
+    if (!checkAdmin(password)) {
+      return res.status(401).json({
+        message: "Senha administrativa incorreta."
+      });
+    }
+
+    if (!process.env.DISCORD_BOT_TOKEN) {
+      return res.status(500).json({
+        message: "Token do Discord não configurado."
+      });
+    }
+
+    const response = await fetch(
+      "https://discord.com/api/v10/applications/1566997087953092738/commands",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify([
+          {
+            name: "ping",
+            description: "Verifica se o RAFX LICENSE está online",
+            type: 1
+          }
+        ])
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Erro Discord:", data);
+      return res.status(500).json({
+        message: "Não foi possível registrar o comando."
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Comando /ping registrado com sucesso!"
+    });
+
+  } catch (error) {
+    console.error("Erro ao registrar comando:", error.message);
+    return res.status(500).json({
+      message: "Erro interno ao registrar comando."
+    });
+  }
+});
 
 // Página inicial
 app.get("/", (req, res) => {
@@ -112,28 +164,30 @@ app.get("/admin", (req, res) => {
       <title>RAFX ADMIN</title>
       <style>
         body {
-          background:#080a12;
-          color:white;
-          font-family:Arial;
-          text-align:center;
-          padding:30px 15px;
+          background: #080a12;
+          color: white;
+          font-family: Arial;
+          text-align: center;
+          padding: 30px 15px;
         }
-        input,select,button {
-          display:block;
-          width:100%;
-          max-width:350px;
-          box-sizing:border-box;
-          padding:14px;
-          margin:12px auto;
-          border-radius:8px;
+        input, select, button {
+          display: block;
+          width: 100%;
+          max-width: 350px;
+          box-sizing: border-box;
+          padding: 14px;
+          margin: 12px auto;
+          border-radius: 8px;
         }
         button {
-          background:#7c3aed;
-          color:white;
-          border:0;
-          font-weight:bold;
+          background: #7c3aed;
+          color: white;
+          border: 0;
+          font-weight: bold;
         }
-        #result { word-break:break-all; }
+        #result {
+          word-break: break-all;
+        }
       </style>
     </head>
     <body>
@@ -151,6 +205,8 @@ app.get("/admin", (req, res) => {
       </select>
 
       <button onclick="generate()">GERAR KEY</button>
+      <button onclick="registerCommand()">REGISTRAR /PING</button>
+
       <p id="result"></p>
 
       <script>
@@ -194,6 +250,29 @@ app.get("/admin", (req, res) => {
             };
 
             result.append(message, key, copy);
+
+          } catch (error) {
+            result.textContent = "Erro de conexão.";
+          }
+        }
+
+        async function registerCommand() {
+          const result = document.getElementById("result");
+          result.textContent = "Registrando comando...";
+
+          try {
+            const response = await fetch("/admin/register-command", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                password: document.getElementById("password").value
+              })
+            });
+
+            const data = await response.json();
+            result.textContent = data.message;
 
           } catch (error) {
             result.textContent = "Erro de conexão.";
@@ -245,14 +324,13 @@ app.post("/admin/generate", async (req, res) => {
 
   } catch (error) {
     console.error("Erro ao gerar key:", error.message);
-
     return res.status(500).json({
       message: "Não foi possível gerar a key."
     });
   }
 });
 
-// Testar licença
+// Página de teste de licença
 app.get("/test", (req, res) => {
   res.type("html").send(`
     <!DOCTYPE html>
@@ -415,7 +493,6 @@ app.post("/validate", async (req, res) => {
 
   } catch (error) {
     console.error("Erro de validação:", error.message);
-
     return res.status(500).json({
       valid: false,
       message: "Erro interno do servidor."
