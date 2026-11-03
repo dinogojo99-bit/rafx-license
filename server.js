@@ -2,17 +2,17 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { verifyKey } from "discord-interactions";
 
 const app = express();
 
-app.use(express.json({ limit: "10kb" }));
-app.use(express.urlencoded({ extended: false }));
-
+// Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Funções auxiliares
 function hashKey(key) {
   return crypto.createHash("sha256").update(key).digest("hex");
 }
@@ -28,6 +28,65 @@ function checkAdmin(password) {
   return a.length === b.length &&
     crypto.timingSafeEqual(a, b);
 }
+
+// Discord: receber e validar interações
+app.post(
+  "/discord/interactions",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const signature = req.headers["x-signature-ed25519"];
+      const timestamp = req.headers["x-signature-timestamp"];
+      const publicKey = process.env.DISCORD_PUBLIC_KEY;
+
+      if (!signature || !timestamp || !publicKey ||
+          !Buffer.isBuffer(req.body)) {
+        return res.status(401).send("Requisição inválida");
+      }
+
+      const valid = verifyKey(
+        req.body,
+        signature,
+        timestamp,
+        publicKey
+      );
+
+      if (!valid) {
+        return res.status(401).send("Assinatura inválida");
+      }
+
+      const interaction = JSON.parse(req.body.toString());
+
+      // PING de verificação do Discord
+      if (interaction.type === 1) {
+        return res.json({ type: 1 });
+      }
+
+      // Comando /ping
+      if (
+        interaction.type === 2 &&
+        interaction.data?.name === "ping"
+      ) {
+        return res.json({
+          type: 4,
+          data: {
+            content: "🔥 RAFX LICENSE está online!"
+          }
+        });
+      }
+
+      return res.status(400).send("Comando desconhecido");
+
+    } catch (error) {
+      console.error("Erro Discord:", error.message);
+      return res.status(400).send("Erro na interação");
+    }
+  }
+);
+
+// JSON das outras rotas
+app.use(express.json({ limit: "10kb" }));
+app.use(express.urlencoded({ extended: false }));
 
 // Página inicial
 app.get("/", (req, res) => {
@@ -86,7 +145,6 @@ app.get("/admin", (req, res) => {
       </select>
 
       <button onclick="generate()">GERAR KEY</button>
-
       <p id="result"></p>
 
       <script>
@@ -114,18 +172,23 @@ app.get("/admin", (req, res) => {
             }
 
             result.innerHTML = "";
+
             const message = document.createElement("p");
             message.textContent = "KEY GERADA:";
+
             const key = document.createElement("p");
             key.textContent = data.key;
+
             const copy = document.createElement("button");
             copy.textContent = "COPIAR KEY";
+
             copy.onclick = async () => {
               await navigator.clipboard.writeText(data.key);
               copy.textContent = "COPIADA!";
             };
 
             result.append(message, key, copy);
+
           } catch (error) {
             result.textContent = "Erro de conexão.";
           }
@@ -218,6 +281,7 @@ app.get("/test", (req, res) => {
 
             const data = await response.json();
             result.textContent = data.message;
+
           } catch (error) {
             result.textContent = "Erro de conexão.";
           }
@@ -265,8 +329,10 @@ app.post("/validate", async (req, res) => {
       });
     }
 
-    if (license.expires_at &&
-        new Date(license.expires_at) <= new Date()) {
+    if (
+      license.expires_at &&
+      new Date(license.expires_at) <= new Date()
+    ) {
       return res.status(403).json({
         valid: false,
         message: "Key expirada."
@@ -308,6 +374,7 @@ app.post("/validate", async (req, res) => {
     }
 
     const now = new Date();
+
     const expires = days[license.plan]
       ? new Date(now.getTime() + days[license.plan] * 86400000)
       : null;
