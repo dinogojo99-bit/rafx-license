@@ -4,36 +4,57 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10kb" }));
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Teste de funcionamento
+app.get("/", (req, res) => {
+  res.json({
+    name: "RAFX LICENSE",
+    status: "online"
+  });
+});
+
 function hashKey(key) {
-  return crypto
-    .createHash("sha256")
-    .update(key)
-    .digest("hex");
+  return crypto.createHash("sha256").update(key).digest("hex");
 }
 
 app.post("/validate", async (req, res) => {
   try {
-    const { key, deviceId } = req.body;
+    const { key, deviceId } = req.body || {};
 
-    if (!key || !deviceId) {
+    if (
+      typeof key !== "string" ||
+      typeof deviceId !== "string" ||
+      !key.trim() ||
+      !deviceId.trim() ||
+      key.length > 200 ||
+      deviceId.length > 200
+    ) {
       return res.status(400).json({
         valid: false,
-        message: "Informe a key e o dispositivo."
+        message: "Key ou dispositivo inválido."
+      });
+    }
+
+    if (!process.env.SUPABASE_URL ||
+        !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({
+        valid: false,
+        message: "Servidor não configurado."
       });
     }
 
     const keyHash = hashKey(key.trim());
+    const device = deviceId.trim();
 
     const { data: license, error } = await supabase
       .from("licenses")
-      .select("*")
+      .select("id, plan, status, device_id, expires_at")
       .eq("key_hash", keyHash)
       .maybeSingle();
 
@@ -46,60 +67,86 @@ app.post("/validate", async (req, res) => {
       });
     }
 
-    if (license.device_id && license.device_id !== deviceId) {
-      return res.status(403).json({
-        valid: false,
-        message: "Key já vinculada a outro dispositivo."
-      });
-    }
-
-    const now = new Date();
-
     if (license.expires_at &&
-        new Date(license.expires_at) <= now) {
+        new Date(license.expires_at) <= new Date()) {
       return res.status(403).json({
         valid: false,
         message: "Key expirada."
       });
     }
 
-    if (license.status === "unused") {
-      const days = {
-        "1d": 1,
-        "7d": 7,
-        "30d": 30
-      };
-
-      const expires = days[license.plan]
-        ? new Date(now.getTime() + days[license.plan] * 86400000)
-        : null;
-
-      const { error: updateError } = await supabase
-        .from("licenses")
-        .update({
-          status: "active",
-          device_id: deviceId,
-          activated_at: now.toISOString(),
-          expires_at: expires?.toISOString() ?? null
-        })
-        .eq("id", license.id)
-        .eq("status", "unused");
-
-      if (updateError) throw updateError;
+    // Key já ativada: somente o mesmo dispositivo pode usar.
+    if (license.status === "active") {
+      if (license.device_id !== device) {
+        return res.status(403).json({
+          valid: false,
+          message: "Key vinculada a outro dispositivo."
+        });
+      }
 
       return res.json({
         valid: true,
-        message: "Key ativada com sucesso!"
+        message: "Key válida!"
+      });
+    }
+
+    if (license.status !== "unused" || license.device_id) {
+      return res.status(403).json({
+        valid: false,
+        message: "Key indisponível."
+      });
+    }
+
+    const days = {
+      "1d": 1,
+      "7d": 7,
+      "30d": 30
+    };
+
+    const now = new Date();
+    const expires = days[license.plan]
+      ? new Date(now.getTime() + days[license.plan] * 86400000)
+      : null;
+
+    if (!days[license.plan] && license.plan !== "lifetime") {
+      return res.status(400).json({
+        valid: false,
+        message: "Plano inválido."
+      });
+    }
+
+    // Atualização condicional: somente uma ativação vence a disputa.
+    const { data: activated, error: updateError } = await supabase
+      .from("licenses")
+      .update({
+        status: "active",
+        device_id: device,
+        activated_at: now.toISOString(),
+        expires_at: expires?.toISOString() ?? null
+      })
+      .eq("id", license.id)
+      .eq("status", "unused")
+      .is("device_id", null)
+      .select("id")
+      .maybeSingle();
+
+    if (updateError) throw updateError;
+
+    if (!activated) {
+      return res.status(403).json({
+        valid: false,
+        message: "Esta key já foi ativada em outro dispositivo."
       });
     }
 
     return res.json({
       valid: true,
-      message: "Key válida!"
+      message: "Key ativada com sucesso!"
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Erro de validação:", error.message);
+
     return res.status(500).json({
       valid: false,
       message: "Erro interno do servidor."
@@ -107,6 +154,4 @@ app.post("/validate", async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("RAFX LICENSE online!");
-});
+export default app;
