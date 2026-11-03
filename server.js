@@ -30,21 +30,26 @@ function checkAdmin(password) {
 }
 
 // Discord: receber e validar interações
+// IMPORTANTE: esta rota precisa ficar antes do express.json()
 app.post(
   "/discord/interactions",
   express.raw({ type: "application/json" }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const signature = req.headers["x-signature-ed25519"];
       const timestamp = req.headers["x-signature-timestamp"];
       const publicKey = process.env.DISCORD_PUBLIC_KEY;
 
-      if (!signature || !timestamp || !publicKey ||
-          !Buffer.isBuffer(req.body)) {
+      if (
+        !signature ||
+        !timestamp ||
+        !publicKey ||
+        !Buffer.isBuffer(req.body)
+      ) {
         return res.status(401).send("Requisição inválida");
       }
 
-      const valid = verifyKey(
+      const valid = await verifyKey(
         req.body,
         signature,
         timestamp,
@@ -79,6 +84,7 @@ app.post(
 
     } catch (error) {
       console.error("Erro Discord:", error.message);
+
       return res.status(400).send("Erro na interação");
     }
   }
