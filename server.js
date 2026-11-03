@@ -4,73 +4,199 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
 const app = express();
+
 app.use(express.json({ limit: "10kb" }));
+app.use(express.urlencoded({ extended: false }));
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Teste de funcionamento
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+function hashKey(key) {
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
 
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
+function checkAdmin(password) {
+  const saved = process.env.ADMIN_PASSWORD;
 
-  next();
-});
+  if (!saved || typeof password !== "string") return false;
+
+  const a = Buffer.from(password);
+  const b = Buffer.from(saved);
+
+  return a.length === b.length &&
+    crypto.timingSafeEqual(a, b);
+}
+
+// Página inicial
 app.get("/", (req, res) => {
   res.json({
     name: "RAFX LICENSE",
     status: "online"
   });
 });
-app.get("/test", (req, res) => {
-  res.send(`
+
+// Painel administrativo
+app.get("/admin", (req, res) => {
+  res.type("html").send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>RAFX LICENSE TEST</title>
+      <title>RAFX ADMIN</title>
       <style>
         body {
-          background: #080a12;
-          color: white;
-          font-family: Arial;
-          text-align: center;
-          padding: 30px 15px;
+          background:#080a12;
+          color:white;
+          font-family:Arial;
+          text-align:center;
+          padding:30px 15px;
         }
-        input, button {
-          display: block;
-          width: 100%;
-          max-width: 350px;
-          box-sizing: border-box;
-          padding: 14px;
-          margin: 12px auto;
-          border-radius: 8px;
+        input,select,button {
+          display:block;
+          width:100%;
+          max-width:350px;
+          box-sizing:border-box;
+          padding:14px;
+          margin:12px auto;
+          border-radius:8px;
         }
         button {
-          background: #7c3aed;
-          color: white;
-          border: 0;
-          font-weight: bold;
+          background:#7c3aed;
+          color:white;
+          border:0;
+          font-weight:bold;
         }
-        #result { margin-top: 20px; }
+        #result { word-break:break-all; }
       </style>
     </head>
     <body>
       <h1>RAFX LICENSE</h1>
-      <p>TESTE DE ATIVAÇÃO</p>
+      <h3>PAINEL ADMINISTRATIVO</h3>
 
+      <input id="password" type="password"
+        placeholder="Senha administrativa">
+
+      <select id="plan">
+        <option value="1d">1 dia</option>
+        <option value="7d">7 dias</option>
+        <option value="30d">30 dias</option>
+        <option value="lifetime">Vitalícia</option>
+      </select>
+
+      <button onclick="generate()">GERAR KEY</button>
+
+      <p id="result"></p>
+
+      <script>
+        async function generate() {
+          const result = document.getElementById("result");
+          result.textContent = "Gerando...";
+
+          try {
+            const response = await fetch("/admin/generate", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                password: document.getElementById("password").value,
+                plan: document.getElementById("plan").value
+              })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              result.textContent = data.message;
+              return;
+            }
+
+            result.innerHTML = "";
+            const message = document.createElement("p");
+            message.textContent = "KEY GERADA:";
+            const key = document.createElement("p");
+            key.textContent = data.key;
+            const copy = document.createElement("button");
+            copy.textContent = "COPIAR KEY";
+            copy.onclick = async () => {
+              await navigator.clipboard.writeText(data.key);
+              copy.textContent = "COPIADA!";
+            };
+
+            result.append(message, key, copy);
+          } catch (error) {
+            result.textContent = "Erro de conexão.";
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// Gerar e salvar key
+app.post("/admin/generate", async (req, res) => {
+  try {
+    const { password, plan } = req.body || {};
+
+    if (!checkAdmin(password)) {
+      return res.status(401).json({
+        message: "Senha administrativa incorreta."
+      });
+    }
+
+    const allowedPlans = ["1d", "7d", "30d", "lifetime"];
+
+    if (!allowedPlans.includes(plan)) {
+      return res.status(400).json({
+        message: "Plano inválido."
+      });
+    }
+
+    const key = "RAFX-" +
+      crypto.randomBytes(12).toString("hex").toUpperCase();
+
+    const { error } = await supabase
+      .from("licenses")
+      .insert({
+        key_hash: hashKey(key),
+        plan,
+        status: "unused"
+      });
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      key,
+      plan
+    });
+
+  } catch (error) {
+    console.error("Erro ao gerar key:", error.message);
+
+    return res.status(500).json({
+      message: "Não foi possível gerar a key."
+    });
+  }
+});
+
+// Testar licença
+app.get("/test", (req, res) => {
+  res.type("html").send(`
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>RAFX TEST</title>
+    </head>
+    <body style="background:#080a12;color:white;font-family:Arial;text-align:center;padding:30px">
+      <h1>RAFX LICENSE</h1>
       <input id="key" placeholder="Digite sua KEY">
       <input id="device" placeholder="ID do dispositivo">
-
       <button onclick="validateKey()">VALIDAR KEY</button>
-
       <p id="result"></p>
 
       <script>
@@ -93,7 +219,7 @@ app.get("/test", (req, res) => {
             const data = await response.json();
             result.textContent = data.message;
           } catch (error) {
-            result.textContent = "Erro de conexão com o servidor.";
+            result.textContent = "Erro de conexão.";
           }
         }
       </script>
@@ -102,10 +228,7 @@ app.get("/test", (req, res) => {
   `);
 });
 
-function hashKey(key) {
-  return crypto.createHash("sha256").update(key).digest("hex");
-}
-
+// Validar licença
 app.post("/validate", async (req, res) => {
   try {
     const { key, deviceId } = req.body || {};
@@ -121,14 +244,6 @@ app.post("/validate", async (req, res) => {
       return res.status(400).json({
         valid: false,
         message: "Key ou dispositivo inválido."
-      });
-    }
-
-    if (!process.env.SUPABASE_URL ||
-        !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return res.status(500).json({
-        valid: false,
-        message: "Servidor não configurado."
       });
     }
 
@@ -158,7 +273,6 @@ app.post("/validate", async (req, res) => {
       });
     }
 
-    // Key já ativada: somente o mesmo dispositivo pode usar.
     if (license.status === "active") {
       if (license.device_id !== device) {
         return res.status(403).json({
@@ -186,11 +300,6 @@ app.post("/validate", async (req, res) => {
       "30d": 30
     };
 
-    const now = new Date();
-    const expires = days[license.plan]
-      ? new Date(now.getTime() + days[license.plan] * 86400000)
-      : null;
-
     if (!days[license.plan] && license.plan !== "lifetime") {
       return res.status(400).json({
         valid: false,
@@ -198,7 +307,11 @@ app.post("/validate", async (req, res) => {
       });
     }
 
-    // Atualização condicional: somente uma ativação vence a disputa.
+    const now = new Date();
+    const expires = days[license.plan]
+      ? new Date(now.getTime() + days[license.plan] * 86400000)
+      : null;
+
     const { data: activated, error: updateError } = await supabase
       .from("licenses")
       .update({
