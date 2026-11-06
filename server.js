@@ -6,6 +6,25 @@ import { verifyKey } from "discord-interactions";
 
 const app = express();
 
+// CORS — PERMITIR CONEXÃO DO APK
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  next();
+});
+
 const ADMIN_DISCORD_ID = "1550285303963717733";
 const DISCORD_APPLICATION_ID = "1566997087953092738";
 
@@ -104,7 +123,6 @@ app.post(
 
       const command = interaction.data?.name;
 
-      // PING
       if (command === "ping") {
         return res.json({
           type: 4,
@@ -114,7 +132,6 @@ app.post(
         });
       }
 
-      // GERAR KEY
       if (command === "gerarkey") {
         if (!isDiscordAdmin(interaction)) {
           return res.json({
